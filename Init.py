@@ -53,7 +53,7 @@ class ValkyriePickPlacePOC:
                 <!-- Place target marker -->
                 <body name="place_target" pos="0.3 0.3 0.8">
                     <geom name="place_marker" type="sphere" size="0.02" 
-                          rgba="0 1 0 0.5" mass="0.001"/>
+                          rgba="0 1 0 0.5" mass = "0.001"/>
                 </body>
                 
                 <!-- Valkyrie Humanoid -->
@@ -113,7 +113,7 @@ class ValkyriePickPlacePOC:
                     
                     <!-- Right Leg -->
                     <body name="right_thigh" pos="0.08 0 -0.35">
-                        <geom name="r_thigh" type="capsule" size="0.04 0.18" rgba="0.7 0.7 0.7 1"/>
+                        <geom name="r_thigh" type="capsule" size="0.04 0.18" rgba="0. 0.7 0.7 0.7 1"/>
                         <joint name="r_hip_pitch" type="hinge" axis="0 1 0" range="-2.0 2.0"/>
                         <joint name="r_hip_roll" type="hinge" axis="1 0 0" range="-0.5 0.5"/>
                         
@@ -309,57 +309,63 @@ class ValkyriePickPlacePOC:
         print(f"Target object at: {self.target_object_pos}")
         print(f"Place target at: {self.place_target_pos}")
         
-        # Create viewer
-        with mujoco.viewer.launch_passive(self.model, self.data) as viewer:
-            # Set camera position for better view
-            viewer.cam.distance = 2.0
-            viewer.cam.azimuth = 45
-            viewer.cam.elevation = -15
-            
-            for step in range(500):  # Extended for better visualization
-                # Get current hand and object positions
-                hand_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'right_hand')
-                hand_pos = self.data.xpos[hand_id]
-                obj_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'target_object')
-                obj_pos = self.data.xpos[obj_id]
+        try:
+            # Create viewer
+            with mujoco.viewer.launch_passive(self.model, self.data) as viewer:
+                # Set camera position for better view
+                viewer.cam.distance = 2.0
+                viewer.cam.azimuth = 45
+                viewer.cam.elevation = -15
                 
-                # Simple proportional control towards object
-                direction = obj_pos - hand_pos
-                distance = np.linalg.norm(direction)
+                for step in range(500):  # Extended for better visualization
+                    # Get current hand and object positions
+                    hand_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'right_hand')
+                    hand_pos = self.data.xpos[hand_id]
+                    obj_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'target_object')
+                    obj_pos = self.data.xpos[obj_id]
+                    
+                    # Simple proportional control towards object
+                    direction = obj_pos - hand_pos
+                    distance = np.linalg.norm(direction)
+                    
+                    # Scale actions based on distance
+                    scale = min(1.0, distance * 2.0)
+                    
+                    action = np.array([
+                        direction[0] * scale,      # r_shoulder_pitch
+                        -direction[1] * scale,     # r_shoulder_roll  
+                        direction[2] * scale,      # r_elbow
+                        0.0,                       #- r_wrist
+                        0.3 if distance < 0.15 else -0.3,  # r_finger1 (close when near)
+                        -0.3 if distance < 0.15 else 0.3   # r_finger2 (close when near)
+                    ])
+                    
+                    # Clip actions to reasonable range
+                    action = np.clip(action, -1.0, 1.0)
+                    
+                    obs, reward, done, info = self.step(action)
+                    total_reward += reward
+                    
+                    # Update viewer
+                    viewer.sync()
+                    
+                    # Control simulation speed
+                    time.sleep(0.01)
+                    
+                    if step % 100 == 0:
+                        print(f"Step {step}: Reward={reward:.3f}, Distance={info['distance_to_object']:.3f}, Grasp={info['grasp_success']}")
+                    
+                    if done:
+                        break
                 
-                # Scale actions based on distance
-                scale = min(1.0, distance * 2.0)
-                
-                action = np.array([
-                    direction[0] * scale,      # r_shoulder_pitch
-                    -direction[1] * scale,     # r_shoulder_roll  
-                    direction[2] * scale,      # r_elbow
-                    0.0,                       # r_wrist
-                    0.3 if distance < 0.15 else -0.3,  # r_finger1 (close when near)
-                    -0.3 if distance < 0.15 else 0.3   # r_finger2 (close when near)
-                ])
-                
-                # Clip actions to reasonable range
-                action = np.clip(action, -1.0, 1.0)
-                
-                obs, reward, done, info = self.step(action)
-                total_reward += reward
-                
-                # Update viewer
-                viewer.sync()
-                
-                # Control simulation speed
-                time.sleep(0.01)
-                
-                if step % 100 == 0:
-                    print(f"Step {step}: Reward={reward:.3f}, Distance={info['distance_to_object']:.3f}, Grasp={info['grasp_success']}")
-                
-                if done:
-                    break
-            
-            print(f"Episode finished. Total reward: {total_reward:.3f}")
-            print("Press any key to close...")
-            input()
+                print(f"Episode finished. Total reward: {total_reward:.3f}")
+                print("Press any key to close...")
+                input()
+        except Exception as e:
+            print(f"Error launching viewer: {e}")
+            print("Ensure that your system has the necessary graphics drivers installed.")
+            print("For AMD GPUs on Ubuntu, install Mesa drivers with: sudo apt-get install mesa-utils libgl1-mesa-dri")
+            print("If the issue persists, try setting the MUJOCO_GL environment variable: export MUJOCO_GL=glx")
         
         return total_reward
     
@@ -440,7 +446,7 @@ def main():
     except Exception as e:
         print(f"Error running POC: {e}")
         print("Make sure MuJoCo is properly installed")
-        print("For visualization, ensure you have display/GUI support")
+        print("For visualization, ensure you have display/GUI support and graphics drivers installed")
 
 if __name__ == "__main__":
     main()
