@@ -1,7 +1,8 @@
 import mujoco
+import mujoco.viewer
 import numpy as np
 import time
-import matplotlib.pyplot as plt
+import threading
 
 class ValkyriePickPlacePOC:
     def __init__(self):
@@ -292,9 +293,75 @@ class ValkyriePickPlacePOC:
         
         return self.get_observation()
     
-    def render(self):
-        """Render current state (placeholder for visualization)"""
-        pass
+    def render(self, viewer=None):
+        """Render current state with MuJoCo viewer"""
+        if viewer is not None:
+            viewer.sync()
+    
+    def demo_episode_with_viewer(self):
+        """Run demonstration with visual feedback"""
+        obs = self.reset()
+        total_reward = 0
+        
+        print("Starting Valkyrie Pick and Place Demo with Visualization")
+        print(f"Observation dimension: {self.obs_dim}")
+        print(f"Action dimension: {self.action_dim}")
+        print(f"Target object at: {self.target_object_pos}")
+        print(f"Place target at: {self.place_target_pos}")
+        
+        # Create viewer
+        with mujoco.viewer.launch_passive(self.model, self.data) as viewer:
+            # Set camera position for better view
+            viewer.cam.distance = 2.0
+            viewer.cam.azimuth = 45
+            viewer.cam.elevation = -15
+            
+            for step in range(500):  # Extended for better visualization
+                # Get current hand and object positions
+                hand_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'right_hand')
+                hand_pos = self.data.xpos[hand_id]
+                obj_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'target_object')
+                obj_pos = self.data.xpos[obj_id]
+                
+                # Simple proportional control towards object
+                direction = obj_pos - hand_pos
+                distance = np.linalg.norm(direction)
+                
+                # Scale actions based on distance
+                scale = min(1.0, distance * 2.0)
+                
+                action = np.array([
+                    direction[0] * scale,      # r_shoulder_pitch
+                    -direction[1] * scale,     # r_shoulder_roll  
+                    direction[2] * scale,      # r_elbow
+                    0.0,                       # r_wrist
+                    0.3 if distance < 0.15 else -0.3,  # r_finger1 (close when near)
+                    -0.3 if distance < 0.15 else 0.3   # r_finger2 (close when near)
+                ])
+                
+                # Clip actions to reasonable range
+                action = np.clip(action, -1.0, 1.0)
+                
+                obs, reward, done, info = self.step(action)
+                total_reward += reward
+                
+                # Update viewer
+                viewer.sync()
+                
+                # Control simulation speed
+                time.sleep(0.01)
+                
+                if step % 100 == 0:
+                    print(f"Step {step}: Reward={reward:.3f}, Distance={info['distance_to_object']:.3f}, Grasp={info['grasp_success']}")
+                
+                if done:
+                    break
+            
+            print(f"Episode finished. Total reward: {total_reward:.3f}")
+            print("Press any key to close...")
+            input()
+        
+        return total_reward
     
     def demo_episode(self):
         """Run a demonstration episode with simple reaching behavior"""
@@ -308,21 +375,36 @@ class ValkyriePickPlacePOC:
         print(f"Place target at: {self.place_target_pos}")
         
         for step in range(200):
-            # Simple reaching action (move arm towards object)
+            # Get current hand and object positions
+            hand_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'right_hand')
+            hand_pos = self.data.xpos[hand_id]
+            obj_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'target_object')
+            obj_pos = self.data.xpos[obj_id]
+            
+            # Simple proportional control towards object
+            direction = obj_pos - hand_pos
+            distance = np.linalg.norm(direction)
+            
+            # Scale actions based on distance
+            scale = min(1.0, distance * 2.0)
+            
             action = np.array([
-                0.1,   # r_shoulder_pitch
-                -0.2,  # r_shoulder_roll  
-                0.3,   # r_elbow
-                0.0,   # r_wrist
-                0.1,   # r_finger1 (close)
-                -0.1   # r_finger2 (close)
+                direction[0] * scale,      # r_shoulder_pitch
+                -direction[1] * scale,     # r_shoulder_roll  
+                direction[2] * scale,      # r_elbow
+                0.0,                       # r_wrist
+                0.3 if distance < 0.15 else -0.3,  # r_finger1 (close when near)
+                -0.3 if distance < 0.15 else 0.3   # r_finger2 (close when near)
             ])
+            
+            # Clip actions to reasonable range
+            action = np.clip(action, -1.0, 1.0)
             
             obs, reward, done, info = self.step(action)
             total_reward += reward
             
             if step % 50 == 0:
-                print(f"Step {step}: Reward={reward:.3f}, Distance to object={info['distance_to_object']:.3f}")
+                print(f"Step {step}: Reward={reward:.3f}, Distance={info['distance_to_object']:.3f}, Grasp={info['grasp_success']}")
             
             if done:
                 break
@@ -336,8 +418,18 @@ def main():
         # Create environment
         env = ValkyriePickPlacePOC()
         
-        # Run demonstration
-        total_reward = env.demo_episode()
+        # Choose demo type
+        print("Choose demo type:")
+        print("1. Text-only demo")
+        print("2. Visual demo (with MuJoCo viewer)")
+        choice = input("Enter choice (1 or 2): ").strip()
+        
+        if choice == "2":
+            # Run visual demonstration
+            total_reward = env.demo_episode_with_viewer()
+        else:
+            # Run text demonstration
+            total_reward = env.demo_episode()
         
         print(f"\nPOC completed successfully!")
         print(f"Environment specs:")
@@ -348,6 +440,7 @@ def main():
     except Exception as e:
         print(f"Error running POC: {e}")
         print("Make sure MuJoCo is properly installed")
+        print("For visualization, ensure you have display/GUI support")
 
 if __name__ == "__main__":
     main()
